@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <time.h>
 
 #include "ladspa.h"
 #include "utils.h"
@@ -33,19 +34,18 @@ typedef struct {
     LADSPA_Data tmp_last_output;
     LADSPA_Data tmp_last_split_frequency;
 
-#if ENABLE_WEAR_LEVELING
     unsigned long tmp_wear_level_counter;
     unsigned long tmp_wear_level_inverse_left_right;
-#endif
 } ladspa_plugin_instance_t;
 
 static LADSPA_Handle ladspa_plugin_init(const LADSPA_Descriptor* Descriptor, unsigned long SampleRate) {
     ladspa_plugin_instance_t* instance = (ladspa_plugin_instance_t*) calloc(1, sizeof(ladspa_plugin_instance_t));
     instance->tmp_sample_rate = SampleRate;
     instance->tmp_2pi_over_sample_rate = 2.0 * M_PI / SampleRate;
-#if ENABLE_WEAR_LEVELING
     instance->tmp_wear_level_counter = 10 * instance->tmp_sample_rate;
-#endif
+    // Randomly select bass channel, to avoid damage to one speaker
+    srand(time(NULL));
+    instance->tmp_wear_level_inverse_left_right = (rand() > (RAND_MAX / 2)) ? 1 : 0;
     return instance;
 }
 
@@ -88,21 +88,17 @@ static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
         LADSPA_Data input = 0.5 * (instance->port_input_left[i] + instance->port_input_right[i]);
         instance->tmp_last_output = instance->tmp_amount_current * input + instance->tmp_amount_previous * instance->tmp_last_output;
 
-#if ENABLE_WEAR_LEVELING
         // Wear leveling between two channels
+#if ENABLE_WEAR_LEVELING
         if(--instance->tmp_wear_level_counter == 0) {
             instance->tmp_wear_level_inverse_left_right = 1 - instance->tmp_wear_level_inverse_left_right;
             instance->tmp_wear_level_counter = 10 * instance->tmp_sample_rate;
         }
 #endif
-
-#if ENABLE_WEAR_LEVELING
         if(instance->tmp_wear_level_inverse_left_right) {
             instance->port_output_right[i] = instance->tmp_last_output * (*instance->conf_bass_boost);
             instance->port_output_left[i] = input - instance->tmp_last_output;
-        } else
-#endif
-        {
+        } else {
             instance->port_output_left[i] = instance->tmp_last_output * (*instance->conf_bass_boost);
             instance->port_output_right[i] = input - instance->tmp_last_output;
         }

@@ -21,4 +21,5 @@ enable_language(CXX)
 
 file(GLOB_RECURSE CUSTOM_SOURCES src/lt_splitfreq.c)
 add_library(lt_splitfreq SHARED ${CUSTOM_SOURCES})
+set_target_properties(lt_splitfreq PROPERTIES PREFIX "")
 install(TARGETS lt_splitfreq DESTINATION ${CUSTOM_INSTALL_DIR})

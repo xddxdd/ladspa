@@ -26,8 +26,10 @@ This plugin splits the bass portion into a dedicated channel (speaker), and the 
 Processing steps:
 
 - Mixes input signal down from stereo to mono
-- Pass the signal through a low-pass filter to the left channel (with an optional gain)
-- ... and a high-pass filter to the right channel
+- Pass the signal through a low-pass filter to one channel (randomly selected, with an optional gain)
+- ... and a high-pass filter to the other channel
+
+This plugin supports randomly selecting the bass channel (speaker) on startup, to avoid damage to one of the speakers in case the bass gain is set too high for too long time. It also supports optional "wear leveling", which switches channel during playback. Note that switching during playback may make the music sound weird.
 
 Credits:
 
