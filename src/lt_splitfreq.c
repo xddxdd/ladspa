@@ -45,7 +45,7 @@ static LADSPA_Handle ladspa_plugin_init(const LADSPA_Descriptor* Descriptor, uns
     instance->tmp_wear_level_counter = 10 * instance->tmp_sample_rate;
     // Randomly select bass channel, to avoid damage to one speaker
     srand(time(NULL));
-    instance->tmp_wear_level_inverse_left_right = (rand() > (RAND_MAX / 2)) ? 1 : 0;
+    instance->tmp_wear_level_inverse_left_right = rand() % 2;
     return instance;
 }
 
