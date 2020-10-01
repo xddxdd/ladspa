@@ -6,8 +6,6 @@
 #include "ladspa.h"
 #include "utils.h"
 
-#define ENABLE_WEAR_LEVELING 0
-
 typedef enum {
     PORT_CONF_SPLIT_FREQUENCY = 0,
     PORT_CONF_BASS_BOOST,
@@ -25,7 +23,7 @@ typedef struct {
     LADSPA_Data* port_input_right;
     LADSPA_Data* port_output_left;
     LADSPA_Data* port_output_right;
-    
+
     // Intermediate values
     LADSPA_Data tmp_amount_previous;
     LADSPA_Data tmp_amount_current;
@@ -42,7 +40,7 @@ static LADSPA_Handle ladspa_plugin_init(const LADSPA_Descriptor* Descriptor, uns
     ladspa_plugin_instance_t* instance = (ladspa_plugin_instance_t*) calloc(1, sizeof(ladspa_plugin_instance_t));
     instance->tmp_sample_rate = SampleRate;
     instance->tmp_2pi_over_sample_rate = 2.0 * M_PI / SampleRate;
-    instance->tmp_wear_level_counter = 10 * instance->tmp_sample_rate;
+    instance->tmp_wear_level_counter = 0;
     // Randomly select bass channel, to avoid damage to one speaker
     srand(time(NULL));
     instance->tmp_wear_level_inverse_left_right = rand() % 2;
@@ -65,15 +63,15 @@ static void ladspa_connect_port(LADSPA_Handle Instance, unsigned long Port, LADS
 static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
     ladspa_plugin_instance_t* instance = (ladspa_plugin_instance_t*) Instance;
 
-    if((*instance->conf_split_frequency) != instance->tmp_last_split_frequency) {
+    if ((*instance->conf_split_frequency) != instance->tmp_last_split_frequency) {
         instance->tmp_last_split_frequency = *instance->conf_split_frequency;
 
         // Recalculate channel component
-        if((*instance->conf_split_frequency) <= 0) {
+        if ((*instance->conf_split_frequency) <= 0) {
             // Reject everything for bass channel
             instance->tmp_amount_current = 0;
             instance->tmp_amount_previous = 0;
-        } else if((*instance->conf_split_frequency) > instance->tmp_sample_rate / 2) {
+        } else if ((*instance->conf_split_frequency) > instance->tmp_sample_rate / 2) {
             // Above Nyquist frequency, accept everything
             instance->tmp_amount_current = 1;
             instance->tmp_amount_previous = 0;
@@ -84,18 +82,25 @@ static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
         }
     }
 
-    for(unsigned long i = 0; i < SampleCount; i++) {
+    for (unsigned long i = 0; i < SampleCount; i++) {
         LADSPA_Data input = 0.5 * (instance->port_input_left[i] + instance->port_input_right[i]);
         instance->tmp_last_output = instance->tmp_amount_current * input + instance->tmp_amount_previous * instance->tmp_last_output;
 
         // Wear leveling between two channels
-#if ENABLE_WEAR_LEVELING
-        if(--instance->tmp_wear_level_counter == 0) {
-            instance->tmp_wear_level_inverse_left_right = 1 - instance->tmp_wear_level_inverse_left_right;
-            instance->tmp_wear_level_counter = 10 * instance->tmp_sample_rate;
+        if (fabs(input) < 1e-5) {
+            // Silent now, decrease counter
+            if (instance->tmp_wear_level_counter == 0) {
+                // Already switched, do nothing
+            } else if (--instance->tmp_wear_level_counter == 0) {
+                // Silent going on for 1 sec, perform switching
+                instance->tmp_wear_level_inverse_left_right = 1 - instance->tmp_wear_level_inverse_left_right;
+            }
+        } else {
+            // Music is loud now, do not swap
+            instance->tmp_wear_level_counter = instance->tmp_sample_rate;
         }
-#endif
-        if(instance->tmp_wear_level_inverse_left_right) {
+
+        if (instance->tmp_wear_level_inverse_left_right) {
             instance->port_output_right[i] = instance->tmp_last_output * (*instance->conf_bass_boost);
             instance->port_output_left[i] = input - instance->tmp_last_output;
         } else {
@@ -113,7 +118,7 @@ LADSPA_Descriptor* ladspa_plugin_info = NULL;
 
 ON_LOAD_ROUTINE {
     ladspa_plugin_info = (LADSPA_Descriptor*) malloc(sizeof(LADSPA_Descriptor));
-    if(ladspa_plugin_info) {
+    if (ladspa_plugin_info) {
         ladspa_plugin_info->UniqueID = 2547;
         ladspa_plugin_info->Label = strdup("splitfreq");
         ladspa_plugin_info->Properties = LADSPA_PROPERTY_HARD_RT_CAPABLE;
