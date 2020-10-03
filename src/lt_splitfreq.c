@@ -97,7 +97,7 @@ static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
             }
         } else {
             // Music is loud now, do not swap
-            instance->tmp_wear_level_counter = instance->tmp_sample_rate;
+            instance->tmp_wear_level_counter = instance->tmp_sample_rate / 10;
         }
 
         if (instance->tmp_wear_level_inverse_left_right) {
