@@ -8,7 +8,10 @@
 
 typedef enum {
     PORT_CONF_SPLIT_FREQUENCY = 0,
-    PORT_CONF_BASS_BOOST,
+    PORT_CONF_BASS_MAX_BOOST,
+    PORT_CONF_BASS_THRESHOLD_DECIBEL,
+    PORT_CONF_TREBLE_MAX_BOOST,
+    PORT_CONF_TREBLE_THRESHOLD_DECIBEL,
     PORT_INPUT_LEFT,
     PORT_INPUT_RIGHT,
     PORT_OUTPUT_LEFT,
@@ -18,7 +21,10 @@ typedef enum {
 
 typedef struct {
     LADSPA_Data* conf_split_frequency;
-    LADSPA_Data* conf_bass_boost;
+    LADSPA_Data* conf_bass_max_boost;
+    LADSPA_Data* conf_bass_threshold_decibel;
+    LADSPA_Data* conf_treble_max_boost;
+    LADSPA_Data* conf_treble_threshold_decibel;
     LADSPA_Data* port_input_left;
     LADSPA_Data* port_input_right;
     LADSPA_Data* port_output_left;
@@ -27,10 +33,16 @@ typedef struct {
     // Intermediate values
     LADSPA_Data tmp_amount_previous;
     LADSPA_Data tmp_amount_current;
+
     unsigned long tmp_sample_rate;
     LADSPA_Data tmp_2pi_over_sample_rate;
+    float tmp_boost_gain;
+
     LADSPA_Data tmp_last_output;
     LADSPA_Data tmp_last_split_frequency;
+
+    float tmp_bass_boost_current;
+    float tmp_treble_boost_current;
 
     unsigned long tmp_wear_level_counter;
     unsigned long tmp_wear_level_inverse_left_right;
@@ -41,6 +53,12 @@ static LADSPA_Handle ladspa_plugin_init(const LADSPA_Descriptor* Descriptor, uns
     instance->tmp_sample_rate = SampleRate;
     instance->tmp_2pi_over_sample_rate = 2.0 * M_PI / SampleRate;
     instance->tmp_wear_level_counter = 0;
+    instance->tmp_bass_boost_current = 1;
+    instance->tmp_treble_boost_current = 1;
+
+    // Set gain to increase 100x (40 dB) per sec
+    instance->tmp_boost_gain = powf(100.0f, 1.0f / SampleRate);
+
     // Randomly select bass channel, to avoid damage to one speaker
     srand(time(NULL));
     instance->tmp_wear_level_inverse_left_right = rand() % 2;
@@ -51,13 +69,20 @@ static void ladspa_connect_port(LADSPA_Handle Instance, unsigned long Port, LADS
     ladspa_plugin_instance_t* instance = (ladspa_plugin_instance_t*) Instance;
     switch((ladspa_port_number_t) Port) {
         case PORT_CONF_SPLIT_FREQUENCY: instance->conf_split_frequency = DataLocation; break;
-        case PORT_CONF_BASS_BOOST: instance->conf_bass_boost = DataLocation; break;
+        case PORT_CONF_BASS_MAX_BOOST: instance->conf_bass_max_boost = DataLocation; break;
+        case PORT_CONF_BASS_THRESHOLD_DECIBEL: instance->conf_bass_threshold_decibel = DataLocation; break;
+        case PORT_CONF_TREBLE_MAX_BOOST: instance->conf_treble_max_boost = DataLocation; break;
+        case PORT_CONF_TREBLE_THRESHOLD_DECIBEL: instance->conf_treble_threshold_decibel = DataLocation; break;
         case PORT_INPUT_LEFT: instance->port_input_left = DataLocation; break;
         case PORT_INPUT_RIGHT: instance->port_input_right = DataLocation; break;
         case PORT_OUTPUT_LEFT: instance->port_output_left = DataLocation; break;
         case PORT_OUTPUT_RIGHT: instance->port_output_right = DataLocation; break;
         default: break;
     }
+}
+
+static __attribute__((const)) float decibel_to_float(float decibel) {
+    return powf(10.0f, decibel / 20.0f);
 }
 
 static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
@@ -86,8 +111,43 @@ static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
         LADSPA_Data input = 0.5 * (instance->port_input_left[i] + instance->port_input_right[i]);
         instance->tmp_last_output = instance->tmp_amount_current * input + instance->tmp_amount_previous * instance->tmp_last_output;
 
+        float bass = instance->tmp_last_output;
+        float treble = input - instance->tmp_last_output;
+
+        // Bass dynamic processing
+        instance->tmp_bass_boost_current = fminf(
+            decibel_to_float(*instance->conf_bass_max_boost),
+            instance->tmp_bass_boost_current * instance->tmp_boost_gain
+        );
+
+        if (fabs(bass) > decibel_to_float(-80)) {
+            // Input is audible, limit on input
+            instance->tmp_bass_boost_current = fminf(
+                instance->tmp_bass_boost_current,
+                decibel_to_float(*instance->conf_bass_threshold_decibel) / fabs(bass)
+            );
+        }
+
+        bass *= instance->tmp_bass_boost_current;
+
+        // Treble dynamic processing
+        instance->tmp_treble_boost_current = fminf(
+            decibel_to_float(*instance->conf_treble_max_boost),
+            instance->tmp_treble_boost_current * instance->tmp_boost_gain
+        );
+
+        if (fabs(treble) > decibel_to_float(-80)) {
+            // Input is audible, limit on input
+            instance->tmp_treble_boost_current = fminf(
+                instance->tmp_treble_boost_current,
+                decibel_to_float(*instance->conf_treble_threshold_decibel) / fabs(treble)
+            );
+        }
+
+        treble *= instance->tmp_treble_boost_current;
+
         // Wear leveling between two channels
-        if (fabs(input) < 1e-4) {
+        if (fabs(input) < decibel_to_float(-80)) {
             // Silent now, decrease counter
             if (instance->tmp_wear_level_counter == 0) {
                 // Already switched, do nothing
@@ -101,11 +161,11 @@ static void ladspa_execute(LADSPA_Handle Instance, unsigned long SampleCount) {
         }
 
         if (instance->tmp_wear_level_inverse_left_right) {
-            instance->port_output_right[i] = instance->tmp_last_output * (*instance->conf_bass_boost);
-            instance->port_output_left[i] = input - instance->tmp_last_output;
+            instance->port_output_right[i] = bass;
+            instance->port_output_left[i] = treble;
         } else {
-            instance->port_output_left[i] = instance->tmp_last_output * (*instance->conf_bass_boost);
-            instance->port_output_right[i] = input - instance->tmp_last_output;
+            instance->port_output_left[i] = treble;
+            instance->port_output_right[i] = bass;
         }
     }
 }
@@ -119,17 +179,20 @@ LADSPA_Descriptor* ladspa_plugin_info = NULL;
 ON_LOAD_ROUTINE {
     ladspa_plugin_info = (LADSPA_Descriptor*) malloc(sizeof(LADSPA_Descriptor));
     if (ladspa_plugin_info) {
-        ladspa_plugin_info->UniqueID = 2547;
+        ladspa_plugin_info->UniqueID = 2548;
         ladspa_plugin_info->Label = strdup("splitfreq");
         ladspa_plugin_info->Properties = LADSPA_PROPERTY_HARD_RT_CAPABLE;
-        ladspa_plugin_info->Name = strdup("LT Stereo Frequency Splitter");
+        ladspa_plugin_info->Name = strdup("LT Stereo Frequency Splitter (w/ Dynamic Boost)");
         ladspa_plugin_info->Maker = strdup("Lan Tian (based on Richard Furse's LADSPA example plugins)");
         ladspa_plugin_info->Copyright = strdup("None");
         ladspa_plugin_info->PortCount = PORT_COUNT;
 
         LADSPA_PortDescriptor* ladspa_port_desc = (LADSPA_PortDescriptor*) calloc(PORT_COUNT, sizeof(LADSPA_PortDescriptor));
         ladspa_port_desc[PORT_CONF_SPLIT_FREQUENCY] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
-        ladspa_port_desc[PORT_CONF_BASS_BOOST] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
+        ladspa_port_desc[PORT_CONF_BASS_MAX_BOOST] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
+        ladspa_port_desc[PORT_CONF_BASS_THRESHOLD_DECIBEL] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
+        ladspa_port_desc[PORT_CONF_TREBLE_MAX_BOOST] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
+        ladspa_port_desc[PORT_CONF_TREBLE_THRESHOLD_DECIBEL] = LADSPA_PORT_INPUT | LADSPA_PORT_CONTROL;
         ladspa_port_desc[PORT_INPUT_LEFT] = LADSPA_PORT_INPUT | LADSPA_PORT_AUDIO;
         ladspa_port_desc[PORT_INPUT_RIGHT] = LADSPA_PORT_INPUT | LADSPA_PORT_AUDIO;
         ladspa_port_desc[PORT_OUTPUT_LEFT] = LADSPA_PORT_OUTPUT | LADSPA_PORT_AUDIO;
@@ -138,7 +201,10 @@ ON_LOAD_ROUTINE {
 
         char** ladspa_port_names = (char**) calloc(PORT_COUNT, sizeof(char*));
         ladspa_port_names[PORT_CONF_SPLIT_FREQUENCY] = strdup("Split Frequency");
-        ladspa_port_names[PORT_CONF_BASS_BOOST] = strdup("Bass Boost");
+        ladspa_port_names[PORT_CONF_BASS_MAX_BOOST] = strdup("Bass Max Boost (dB)");
+        ladspa_port_names[PORT_CONF_BASS_THRESHOLD_DECIBEL] = strdup("Bass Threshold (dB)");
+        ladspa_port_names[PORT_CONF_TREBLE_MAX_BOOST] = strdup("Treble Max Boost (dB)");
+        ladspa_port_names[PORT_CONF_TREBLE_THRESHOLD_DECIBEL] = strdup("Treble Threshold (dB)");
         ladspa_port_names[PORT_INPUT_LEFT] = strdup("Input (Left)");
         ladspa_port_names[PORT_INPUT_RIGHT] = strdup("Input (Right)");
         ladspa_port_names[PORT_OUTPUT_LEFT] = strdup("Output (Left)");
@@ -150,8 +216,18 @@ ON_LOAD_ROUTINE {
             = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_BOUNDED_ABOVE | LADSPA_HINT_SAMPLE_RATE | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_100);
         ladspa_port_range_hint[PORT_CONF_SPLIT_FREQUENCY].LowerBound = 0;
         ladspa_port_range_hint[PORT_CONF_SPLIT_FREQUENCY].UpperBound = 0.5; /* Nyquist frequency (half the sample rate) */
-        ladspa_port_range_hint[PORT_CONF_BASS_BOOST].HintDescriptor = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_1);
-        ladspa_port_range_hint[PORT_CONF_BASS_BOOST].LowerBound = 0;
+        ladspa_port_range_hint[PORT_CONF_BASS_MAX_BOOST].HintDescriptor = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_100);
+        ladspa_port_range_hint[PORT_CONF_BASS_MAX_BOOST].LowerBound = 0;
+        ladspa_port_range_hint[PORT_CONF_BASS_MAX_BOOST].UpperBound = 100;
+        ladspa_port_range_hint[PORT_CONF_BASS_THRESHOLD_DECIBEL].HintDescriptor = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_0);
+        ladspa_port_range_hint[PORT_CONF_BASS_THRESHOLD_DECIBEL].LowerBound = -100;
+        ladspa_port_range_hint[PORT_CONF_BASS_THRESHOLD_DECIBEL].UpperBound = 0;
+        ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].HintDescriptor = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_100);
+        ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].LowerBound = 0;
+        ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].UpperBound = 100;
+        ladspa_port_range_hint[PORT_CONF_TREBLE_THRESHOLD_DECIBEL].HintDescriptor = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_0);
+        ladspa_port_range_hint[PORT_CONF_TREBLE_THRESHOLD_DECIBEL].LowerBound = -100;
+        ladspa_port_range_hint[PORT_CONF_TREBLE_THRESHOLD_DECIBEL].UpperBound = 0;
         ladspa_port_range_hint[PORT_INPUT_LEFT].HintDescriptor = 0;
         ladspa_port_range_hint[PORT_INPUT_RIGHT].HintDescriptor = 0;
         ladspa_port_range_hint[PORT_OUTPUT_LEFT].HintDescriptor = 0;

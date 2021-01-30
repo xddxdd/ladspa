@@ -23,3 +23,8 @@ file(GLOB_RECURSE CUSTOM_SOURCES src/lt_splitfreq.c)
 add_library(lt_splitfreq SHARED ${CUSTOM_SOURCES})
 set_target_properties(lt_splitfreq PROPERTIES PREFIX "")
 install(TARGETS lt_splitfreq DESTINATION ${CUSTOM_INSTALL_DIR})
+
+file(GLOB_RECURSE CUSTOM_SOURCES src/lt_splitfreq_dyn.c)
+add_library(lt_splitfreq_dyn SHARED ${CUSTOM_SOURCES})
+set_target_properties(lt_splitfreq_dyn PROPERTIES PREFIX "")
+install(TARGETS lt_splitfreq_dyn DESTINATION ${CUSTOM_INSTALL_DIR})
