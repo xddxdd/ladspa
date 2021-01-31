@@ -220,7 +220,7 @@ ON_LOAD_ROUTINE {
         ladspa_port_range_hint[PORT_CONF_BASS_THRESHOLD_DECIBEL].LowerBound = -100;
         ladspa_port_range_hint[PORT_CONF_BASS_THRESHOLD_DECIBEL].UpperBound = 0;
         ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].HintDescriptor
-            = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_100);
+            = (LADSPA_HINT_BOUNDED_BELOW | LADSPA_HINT_LOGARITHMIC | LADSPA_HINT_DEFAULT_0);
         ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].LowerBound = 0;
         ladspa_port_range_hint[PORT_CONF_TREBLE_MAX_BOOST].UpperBound = 100;
         ladspa_port_range_hint[PORT_CONF_TREBLE_THRESHOLD_DECIBEL].HintDescriptor
