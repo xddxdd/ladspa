@@ -3,8 +3,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "ladspa.h"
-#include "utils.h"
+#include "include/ladspa.h"
+#include "include/utils.h"
 
 typedef enum {
     PORT_CONF_SPLIT_FREQUENCY = 0,
