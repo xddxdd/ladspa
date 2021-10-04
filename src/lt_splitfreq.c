@@ -3,8 +3,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "include/ladspa.h"
-#include "include/utils.h"
+#include "ladspa.h"
+#include "utils.h"
 
 typedef enum {
     PORT_CONF_SPLIT_FREQUENCY = 0,
@@ -118,8 +118,8 @@ LADSPA_Descriptor* ladspa_plugin_info = NULL;
 ON_LOAD_ROUTINE {
     ladspa_plugin_info = (LADSPA_Descriptor*) malloc(sizeof(LADSPA_Descriptor));
     if (ladspa_plugin_info) {
-        ladspa_plugin_info->UniqueID   = 25470;
-        ladspa_plugin_info->Label      = strdup("lt_splitfreq");
+        ladspa_plugin_info->UniqueID   = 2547;
+        ladspa_plugin_info->Label      = strdup("splitfreq");
         ladspa_plugin_info->Properties = LADSPA_PROPERTY_HARD_RT_CAPABLE;
         ladspa_plugin_info->Name       = strdup("LT Stereo Frequency Splitter");
         ladspa_plugin_info->Maker      = strdup("Lan Tian (based on Richard Furse's LADSPA example plugins)");

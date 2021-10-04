@@ -1,7 +1,0 @@
-LADSPA_SDK
-{
-  global: 
-   ladspa_descriptor;
-  local:
-   *;
-};
